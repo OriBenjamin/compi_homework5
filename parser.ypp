@@ -1,0 +1,181 @@
+%{
+    #include <iostream>
+    #include "hw3_output.hpp"
+    #include "tokens.h"
+    #include "symbol_table.h"
+    #include "bp.hpp"
+
+    using namespace output;
+    int whiles = 0;
+
+    int yylex();
+    void yyerror(const char*);
+    extern TableStack tables;
+    extern int yylineno;
+%}
+
+%token ASSIGN
+%left OR
+%left AND
+%left RELOP
+%left ADDOP
+%left MULOP
+%right CAST
+%right NOT
+%left LPAREN
+%left RPAREN
+%token INT
+%token BYTE
+%token B
+%token BOOL
+%token TRUE
+%token FALSE
+%token WHILE
+%token RETURN
+%token BREAK
+%token CONTINUE
+%token SC
+%token LBRACE
+%token RBRACE
+%token ID
+%token NUM
+%token STRING
+%token IF
+%nonassoc ELSE
+%%
+
+
+Program: Statements {CodeBuffer::instance().printCodeBuffer();}
+Statements: Statement {}
+| Statements Statement {}
+;
+Statement: LBRACE CRSK Statements RBRACE {tables.popScope();}
+| Type ID SC {if(tables.symbol_exists(($2)->value))
+                {
+                    output::errorDef(yylineno,($2)->value);
+                    exit(0);
+                } else {
+                    tables.insert_symbol(($2)->value,dynamic_cast<type_token*>($1)->type);
+                } 
+                }
+
+| Type ID ASSIGN Exp SC {if(tables.symbol_exists(($2)->value)) 
+                    {
+                        output::errorDef(yylineno,($2)->value);
+                        exit(0);
+                    } else if(dynamic_cast<exp_token*>($4)->type!=dynamic_cast<type_token*>(($1))->type && !(($4)->type=="BYTE"&&dynamic_cast<type_token*>($1)->type=="INT"))
+                    {
+                        output::errorMismatch(yylineno);
+                        exit(0);
+                    } else {
+                        tables.insert_symbol(($2)->value,dynamic_cast<type_token*>(($1))->type);
+                    }}
+| ID ASSIGN Exp SC {if(!tables.symbol_exists(($1)->value)) 
+                    {
+                        output::errorUndef(yylineno,($1)->value);
+                        exit(0);
+                    } else {
+                        string id_type = tables.get_symbol(($1)->value).type;
+                        if(dynamic_cast<exp_token*>($3)->type!=id_type && !(dynamic_cast<exp_token*>($3)->type=="BYTE"&&id_type=="INT")) 
+                        {
+                            output::errorMismatch(yylineno);
+                            exit(0);
+                        } else {
+                        
+                        }
+                    }}
+| Call SC { }
+| RETURN SC {             }
+| IF LPAREN ExpBool RPAREN CRSK Statement {
+                tables.popScope();
+                }
+| IF LPAREN ExpBool RPAREN CRSK Statement ELSE RMSK CRSK Statement {
+                if(dynamic_cast<exp_token*>($3)->type!="BOOL")
+                            {
+                                output::errorMismatch(yylineno);
+                                exit(0);
+                            }
+                tables.popScope();
+                }
+| WHILE LPAREN ExpBool RPAREN CRSK W Statement {
+                        whiles--;
+                        if(dynamic_cast<exp_token*>($3)->type!="BOOL")
+                        {
+                            output::errorMismatch(yylineno);
+                            exit(0);
+                        }
+                        tables.popScope();
+                        }
+| BREAK SC { if (whiles==0) 
+            {
+                output::errorUnexpectedBreak(yylineno);
+                exit(0);
+            } else {
+                
+            }}
+| CONTINUE SC { if (whiles==0)
+            {
+                output::errorUnexpectedContinue(yylineno);
+                exit(0);
+            } else {
+                
+            }}
+;
+W: {whiles++;}
+;
+ExpBool: Exp {
+    if(dynamic_cast<exp_token*>($1)->type!="BOOL")
+    {
+        output::errorMismatch(yylineno);
+        exit(0);
+    }
+    $$ = $1;
+};
+CRSK: {tables.makeNewScope();}
+;
+RMSK: {tables.popScope();}
+;
+Call: ID LPAREN Exp RPAREN { 
+    $$ = new call_token(dynamic_cast<base_token*>($1), dynamic_cast<exp_token*>($3)); }
+;               
+Type: INT { $$ = new type_token("INT"); }
+| BYTE { $$ = new type_token("BYTE"); }
+| BOOL { $$ = new type_token("BOOL"); }
+;
+Exp: LPAREN Exp RPAREN { 
+    $$ = new exp_token(dynamic_cast<exp_token*>($2)); }
+| Exp ADDOP Exp { $$ = new exp_token("binop", dynamic_cast<exp_token*>($1), dynamic_cast<exp_token*>($3), ($2)->value); }
+| Exp MULOP Exp { $$ = new exp_token("binop", dynamic_cast<exp_token*>($1), dynamic_cast<exp_token*>($3), ($2)->value); }
+| ID { 
+    $$ = new exp_token($1, "ID"); }
+| Call { 
+    
+    $$ = new exp_token(dynamic_cast<call_token*>($1)); }
+| NUM { $$ = new exp_token($1, "INT");}
+| NUM B { $$ = new exp_token($1, "BYTE");}
+| STRING { $$ = new exp_token($1, "STRING");}
+| TRUE { $$ = new exp_token($1, "BOOL");}
+| FALSE { $$ = new exp_token($1, "BOOL");}
+| NOT Exp { $$ = new exp_token("logic", dynamic_cast<exp_token*>($2), ($1)->value); }
+| Exp AND Exp { $$ = new exp_token("logic", dynamic_cast<exp_token*>($1), dynamic_cast<exp_token*>($3), ($2)->value); }
+| Exp OR Exp { $$ = new exp_token("logic", dynamic_cast<exp_token*>($1), dynamic_cast<exp_token*>($3), ($2)->value); }
+| Exp RELOP Exp { 
+    $$ = new exp_token("relop", dynamic_cast<exp_token*>($1), dynamic_cast<exp_token*>($3), ($2)->value); }
+| LPAREN Type RPAREN Exp %prec CAST { $$ = new exp_token(dynamic_cast<type_token*>($2), dynamic_cast<exp_token*>($4)); }
+;
+
+%%
+
+
+TableStack tables = TableStack();
+
+void yyerror(const char * message){
+    errorSyn(yylineno);
+	exit(0);
+}
+
+int main(){
+        int res = yyparse();
+        tables.popScope(); 
+        return res;
+}
